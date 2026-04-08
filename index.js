@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const bcrypt = require('bcryptjs'); 
 const jwt = require('jsonwebtoken');
 const axios = require('axios'); 
+const { apigwClient } = require("selcom-apigw-client");
 
 const app = express();
 
@@ -13,10 +14,21 @@ const app = express();
 // Imetayarishwa kwa ajili ya Render (Port 10000)
 const PORT = process.env.PORT || 10000; 
 const rawMongoURI = process.env.MONGO_URI; 
+
+// A) Security Keys za Mfumo Wako (Internal)
 const API_SECRET = process.env.API_SECRET_KEY || "Emily_Crypto_Secure_2026_KIU";
 const JWT_SECRET = "Emily_Crypto_SaaS_Token_2026";
 
-// Link ya Backend yako ya Python iliyo LIVE Render sasa hivi
+// B) Selcom API Credentials (External)
+// Hizi zitasomwa kutoka kwenye Environment Variables uliyoandika kule Render
+const selcomApiKey = process.env.SELCOM_API_KEY;
+const selcomApiSecret = process.env.SELCOM_API_SECRET;
+const selcomBaseUrl = "https://apigw.selcom.co.tz/home"; 
+
+// Initialize Selcom Client hapa hapa
+const selcomClient = new apigwClient(selcomBaseUrl, selcomApiKey, selcomApiSecret);
+
+// C) Link ya Backend ya Python
 const PYTHON_BACKEND_URL = "https://ultimate-crypto-python.onrender.com";
 
 if (!rawMongoURI) {
@@ -135,21 +147,36 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// MPESA STK PUSH
+//// MPESA STK PUSH (Updated for Selcom Production)
 app.post('/api/payments/stkpush', async (req, res) => {
     const { phoneNumber, amount } = req.body;
-    try {
-        setTimeout(() => {
-            console.log(`✅ [PAYMENT] Request Successful for ${phoneNumber}`);
-        }, 1000);
 
-        res.status(200).json({
-            status: "Success",
-            message: "STK Push Sent. Tafadhali weka PIN kwenye simu yako.",
-            checkoutID: "Emily_KIU_" + Math.floor(Math.random() * 1000000)
-        });
+    try {
+        const walletCashinRequestJson = {
+            "transid": "UC-" + Date.now(), // Unique ID kila wakati
+            "utilitycode": "VMCASHIN",
+            "utilityref": phoneNumber,      // Namba ya mteja (iliyotumwa kutoka Java)
+            "amount": amount,
+            "vendor": "64654949",          // Badilisha na Vendor ID yako ukipata
+            "pin": "3545846",              // Hii ni placeholder
+            "msisdn": phoneNumber.startsWith('0') ? '255' + phoneNumber.substring(1) : phoneNumber
+        };
+
+        const walletCashinRequestPath = "/v1/wallet-cashin";
+
+        // Tuma ombi Selcom
+        const response = await selcomClient.postFunc(walletCashinRequestPath, walletCashinRequestJson);
+
+        console.log(`✅ [SELCOM] Payment Request Sent for ${phoneNumber}`);
+        res.status(200).json(response);
+
     } catch (error) {
-        res.status(500).json({ status: "Error", message: "M-Pesa Gateway Failure" });
+        console.error("❌ [SELCOM ERROR]", error);
+        res.status(500).json({ 
+            status: "Error", 
+            message: "Selcom Gateway Failure",
+            details: error.message 
+        });
     }
 });
 
