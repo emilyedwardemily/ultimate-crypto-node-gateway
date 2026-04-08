@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const bcrypt = require('bcryptjs'); 
 const jwt = require('jsonwebtoken');
 const axios = require('axios'); 
+const morgan = require('morgan'); // IMEONGEZWA: Kwa ajili ya ku-monitor traffic ya biashara
 const apigwClient = require("selcom-apigw-client");
 
 const app = express();
@@ -20,12 +21,11 @@ const API_SECRET = process.env.API_SECRET_KEY || "Emily_Crypto_Secure_2026_KIU";
 const JWT_SECRET = "Emily_Crypto_SaaS_Token_2026";
 
 // B) Selcom API Credentials (External)
-// Hizi zitasomwa kutoka kwenye Environment Variables uliyoandika kule Render
 const selcomApiKey = process.env.SELCOM_API_KEY;
 const selcomApiSecret = process.env.SELCOM_API_SECRET;
 const selcomBaseUrl = "https://apigw.selcom.co.tz/home"; 
 
-// Initialize Selcom Client hapa hapa
+// Initialize Selcom Client (Bila mabano {} kwenye require ili kuepuka constructor error)
 const selcomClient = new apigwClient(selcomBaseUrl, selcomApiKey, selcomApiSecret);
 
 // C) Link ya Backend ya Python
@@ -38,6 +38,7 @@ if (!rawMongoURI) {
 
 // --- 2. MIDDLEWARES ---
 app.use(helmet()); 
+app.use(morgan('dev')); // IMEONGEZWA: Itakuonyesha kila "Login" au "Payment" inayofanyika kwenye logs
 app.use(express.json({ limit: '50mb' })); 
 
 // Imeruhusiwa sasa kuongea na Backend ya Python na Browser
@@ -94,7 +95,7 @@ app.post('/api/auth/register', async (req, res) => {
         const { email, password, username } = req.body;
         const db = mongoose.connection.db;
         const userExists = await db.collection('users').findOne({ email });
-        if (userExists) return res.status(400).json({ error: "User tayari yupo!" });
+        if (userExists) return res.status(400).json({ status: "Fail", message: "User tayari yupo!" });
 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
@@ -109,21 +110,26 @@ app.post('/api/auth/register', async (req, res) => {
 
         await db.collection('users').insertOne(newUser);
         console.log(`[SECURE] New user registered: ${username}`);
-        res.status(201).json({ message: "Akaunti imetengenezwa vizuri!" });
+        res.status(201).json({ status: "Success", message: "Akaunti imetengenezwa vizuri!" });
     } catch (err) {
         console.error("Registration Error:", err);
-        res.status(500).json({ error: "Server Error wakati wa kusajili." });
+        res.status(500).json({ status: "Error", message: "Server Error wakati wa kusajili." });
     }
 });
 
-// LOGIN
+// LOGIN (Boreshwa kwa ajili ya Commercial Standard)
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
         const db = mongoose.connection.db;
         const user = await db.collection('users').findOne({ email });
 
-        if (!user) return res.status(400).json({ error: "Email haijapatikana!" });
+        if (!user) {
+            return res.status(404).json({ 
+                status: "Fail", 
+                message: "Akaunti haijapatikana. Tafadhali jisajili." 
+            });
+        }
 
         let isMatch = false;
         if (user.password.startsWith('$')) {
@@ -133,40 +139,52 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         if (isMatch) {
-            const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-            return res.json({
-                message: "Login Successful",
+            const token = jwt.sign(
+                { userId: user._id, role: user.role }, 
+                JWT_SECRET, 
+                { expiresIn: '24h' }
+            );
+
+            console.log(`[AUTH] Successful login for: ${email}`);
+
+            return res.status(200).json({
+                status: "Success",
+                message: "Karibu kwenye Ultimate Crypto Suite",
                 token,
-                user: { username: user.username, role: user.role }
+                user: { 
+                    username: user.username, 
+                    role: user.role,
+                    lastLogin: new Date().toISOString()
+                }
             });
         } else {
-            return res.status(400).json({ error: "Password siyo sahihi!" });
+            return res.status(401).json({ 
+                status: "Fail", 
+                message: "Nenosiri siyo sahihi. Jaribu tena." 
+            });
         }
     } catch (err) {
-        res.status(500).json({ error: "Server Error wakati wa login." });
+        console.error("Login Server Error:", err);
+        res.status(500).json({ status: "Error", message: "Tatizo la kiufundi, jaribu baadae." });
     }
 });
 
-//// MPESA STK PUSH (Updated for Selcom Production)
+//// MPESA STK PUSH (Selcom Production Ready)
 app.post('/api/payments/stkpush', async (req, res) => {
     const { phoneNumber, amount } = req.body;
 
     try {
         const walletCashinRequestJson = {
-            "transid": "UC-" + Date.now(), // Unique ID kila wakati
+            "transid": "UC-" + Date.now(),
             "utilitycode": "VMCASHIN",
-            "utilityref": phoneNumber,      // Namba ya mteja (iliyotumwa kutoka Java)
+            "utilityref": phoneNumber,
             "amount": amount,
-            "vendor": "64654949",          // Badilisha na Vendor ID yako ukipata
-            "pin": "3545846",              // Hii ni placeholder
+            "vendor": "64654949",
+            "pin": "3545846",
             "msisdn": phoneNumber.startsWith('0') ? '255' + phoneNumber.substring(1) : phoneNumber
         };
 
-        const walletCashinRequestPath = "/v1/wallet-cashin";
-
-        // Tuma ombi Selcom
-        const response = await selcomClient.postFunc(walletCashinRequestPath, walletCashinRequestJson);
-
+        const response = await selcomClient.postFunc("/v1/wallet-cashin", walletCashinRequestJson);
         console.log(`✅ [SELCOM] Payment Request Sent for ${phoneNumber}`);
         res.status(200).json(response);
 
@@ -182,15 +200,10 @@ app.post('/api/payments/stkpush', async (req, res) => {
 
 // MPESA CALLBACK
 app.post('/api/payments/callback', (req, res) => {
-    const callbackData = req.body;
-    if (callbackData.resultcode === "000" || callbackData.status === "SUCCESS") {
-        res.status(200).send("OK");
-    } else {
-        res.status(200).send("OK");
-    }
+    res.status(200).send("OK");
 });
 
-// SYNC ROUTE (Unganisha na Python hapa ukitaka)
+// SYNC ROUTE
 app.post('/api/vault/sync', async (req, res) => {
     try {
         const { userId, service, encryptedData, type } = req.body;
@@ -198,7 +211,7 @@ app.post('/api/vault/sync', async (req, res) => {
 
         const entry = new Crypto({ userId, service, encryptedData, type });
         await entry.save();
-        res.status(201).json({ status: "success", message: "Data Secured in MongoDB Cloud" });
+        res.status(201).json({ status: "Success", message: "Data Secured in MongoDB Cloud" });
     } catch (error) {
         res.status(500).json({ status: "Error", message: "Internal Sync Failure" });
     }
@@ -226,7 +239,7 @@ app.get('/status', (req, res) => {
 
 // --- 7. START SERVER ---
 app.listen(PORT, () => {
-    console.log(`\n🚀 [SERVER] Gateway Active on Port: ${PORT}`);
+    console.log(`\n🚀 [SERVER] Professional Gateway Active on Port: ${PORT}`);
     console.log(`🔗 Python Link: ${PYTHON_BACKEND_URL}`);
     console.log(`📂 Database: MongoDB Atlas Ready\n`);
 });
