@@ -6,7 +6,7 @@ const helmet = require('helmet');
 const bcrypt = require('bcryptjs'); 
 const jwt = require('jsonwebtoken');
 const axios = require('axios'); 
-const { apigwClient } = require("selcom-apigw-client");
+const apigwClient = require("selcom-apigw-client");
 
 const app = express();
 
