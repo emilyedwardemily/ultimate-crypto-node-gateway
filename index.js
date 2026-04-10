@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios'); 
 const morgan = require('morgan'); // IMEONGEZWA: Kwa ajili ya ku-monitor traffic ya biashara
-const Selcom = require("selcom-apigw-client");
+const { Client: Selcom } = require("selcom-apigw-client");
 const app = express();
 
 // --- 1. CONFIGURATION ---
