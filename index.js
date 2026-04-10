@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios'); 
 const morgan = require('morgan'); // IMEONGEZWA: Kwa ajili ya ku-monitor traffic ya biashara
-const { Client: Selcom } = require("selcom-apigw-client");
+const Selcom = require("selcom-apigw-client");
 const app = express();
 
 // --- 1. CONFIGURATION ---
@@ -25,7 +25,12 @@ const selcomApiSecret = process.env.SELCOM_API_SECRET;
 const selcomBaseUrl = "https://apigw.selcom.co.tz/home"; 
 
 // Initialize Selcom Client (Bila mabano {} kwenye require ili kuepuka constructor error)
-const selcomClient = new Selcom(selcomBaseUrl, selcomApiKey, selcomApiSecret);
+
+const selcomClient = new Selcom({
+    baseUrl: selcomBaseUrl,
+    apiKey: selcomApiKey,
+    apiSecret: selcomApiSecret
+});
 
 // C) Link ya Backend ya Python
 const PYTHON_BACKEND_URL = "https://ultimate-crypto-python.onrender.com";
