@@ -1,2 +1,29 @@
-node_modules
+# Java build artifacts
+target/
+*.class
+
+# Node.js and dependencies
+node_modules/
+package-lock.json
+
+# Environment and Secret files (Sensitive Data)
 .env
+.sys_auth.bin
+license.dat
+*.bin
+*.dat
+
+# Security Reports and forensics
+Forensic_Report*.txt
+*.txt
+
+# Media and Image files (Steganography results)
+*.png
+*.jpg
+*.jpeg
+
+# IDE settings
+.idea/
+.settings/
+.project
+.vscode/
